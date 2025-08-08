@@ -12,7 +12,7 @@ def main():
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     # Update old values to new enum values
-    cur.execute("UPDATE projects SET status = 'not_started' WHERE status = 'planned'")
+    cur.execute("UPDATE projects SET status = 'not_started' WHERE status IN ('planned', 'Planned')")
     cur.execute("UPDATE projects SET status = 'completed' WHERE status = 'complete'")
     conn.commit()
     print("Project status values updated.")

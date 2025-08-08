@@ -23,7 +23,7 @@ class ProjectBase(BaseModel):
     address: Optional[str] = None
     start_date: Optional[date] = None
     target_completion_date: Optional[date] = None
-    status: Optional[str] = "Planned"
+    status: Optional[str] = "not_started"
     total_sqft: Optional[int] = None
 
 class ProjectCreate(ProjectBase):
@@ -42,7 +42,7 @@ class ForecastLineItemBase(BaseModel):
     unit: Optional[str] = None
     notes: Optional[str] = None
     progress_percent: int = 0
-    status: Optional[str] = "Not Started"
+    status: Optional[str] = "not_started"
 
 class ForecastLineItemCreate(ForecastLineItemBase):
     pass

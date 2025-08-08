@@ -3,6 +3,9 @@ import os
 import tempfile
 import pytest
 from fastapi.testclient import TestClient
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from main import app
 from models import Base
 from database import engine
@@ -21,6 +24,33 @@ def teardown_module(module):
 def ids():
     return {}
 
+def test_create_project():
+    payload = {
+        "name": "UnitTest Project",
+        "address": "456 Test Ave",
+        "status": "not_started",
+        "total_sqft": 1200
+    }
+    r = client.post("/api/projects/", json=payload)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["name"] == payload["name"]
+    assert data["address"] == payload["address"]
+    assert data["status"] == payload["status"]
+    assert data["total_sqft"] == payload["total_sqft"]
+    assert "id" in data
+
+    # Test required field validation
+    bad_payload = {"address": "No Name"}
+    r = client.post("/api/projects/", json=bad_payload)
+    assert r.status_code == 422
+
+    # Test listing
+    r = client.get("/api/projects/")
+    assert r.status_code == 200
+    projects = r.json()
+    assert any(p["name"] == "UnitTest Project" for p in projects)
+
 def test_full_flow(ids):
     # Create Project
     payload = {
@@ -28,7 +58,7 @@ def test_full_flow(ids):
         "address": "123 Main St",
         "start_date": "2025-08-01",
         "target_completion_date": "2025-12-31",
-        "status": "Planned",
+        "status": "not_started",
         "total_sqft": 2500
     }
     r = client.post("/api/projects/", json=payload)
@@ -44,7 +74,7 @@ def test_full_flow(ids):
         "unit": "lump sum",
         "notes": "Includes all framing",
         "progress_percent": 0,
-        "status": "Not Started"
+        "status": "not_started"
     }
     r = client.post("/api/forecast-items/", json=payload)
     print("Create ForecastLineItem Response:", r.status_code, r.json())
@@ -105,7 +135,7 @@ def test_full_flow(ids):
         "unit": "lump sum",
         "notes": "Includes all framing",
         "progress_percent": 50,
-        "status": "In Progress"
+        "status": "in_progress"
     })
     print("Update ForecastLineItem Response:", r.status_code, r.json())
     assert r.status_code == 200
