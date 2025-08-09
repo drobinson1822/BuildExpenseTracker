@@ -1,21 +1,201 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status, Header, Request, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
-from database import SessionLocal
-from models import Project, ForecastLineItem, ActualExpense, DrawTracker, Base
-from pydantic import BaseModel
-from typing import List, Optional
-from datetime import date
+from sqlalchemy.exc import SQLAlchemyError
+from database import get_db, Base, SessionLocal
+from models import Project, ForecastLineItem, ActualExpense, DrawTracker, ProjectStatusEnum, ForecastStatusEnum
+from pydantic import BaseModel, Field, validator, ConfigDict
+from typing import List, Optional, Any, Dict
+from datetime import date, datetime
+import logging
+from supabase_client import get_current_user, supabase, supabase_admin
+import os
 
-# Dependency
+# Security configuration
+security = HTTPBearer()
 
-def get_db():
-    db = SessionLocal()
+async def get_current_user_http(authorization: HTTPAuthorizationCredentials = Security(security)) -> Dict[str, Any]:
+    """
+    Get current user from Authorization header using Supabase's JWT
+    """
     try:
-        yield db
-    finally:
-        db.close()
+        token = authorization.credentials
+        # Use Supabase's built-in JWT verification
+        user = supabase.auth.get_user(token)
+        return {
+            'id': user.user.id,
+            'email': user.user.email,
+            'role': user.user.role,
+            'token': token
+        }
+    except Exception as e:
+        logging.error(f"Authentication error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-router = APIRouter(prefix="/api")
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize router with tags for better API documentation
+router = APIRouter(
+    tags=["api"],
+    responses={
+        401: {"description": "Unauthorized"},
+        404: {"description": "Not found"},
+        500: {"description": "Internal server error"}
+    },
+)
+
+# Pydantic models for authentication
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: Dict[str, Any]
+
+class UserCreate(BaseModel):
+    email: str  # Changed from EmailStr to str to remove validation
+    password: str
+    user_metadata: Optional[Dict[str, Any]] = None
+
+class UserLogin(BaseModel):
+    email: str  # Changed from EmailStr to str to remove validation
+    password: str
+
+# Auth endpoints
+@router.post("/auth/register", response_model=Dict[str, Any])
+async def register(user: UserCreate):
+    """Register a new user"""
+    logger.info(f"Attempting to register user with email: {user.email}")
+    
+    try:
+        # Check if user already exists in Supabase
+        existing_user = supabase.auth.admin.get_user_by_email(user.email)
+        if existing_user.user:
+            logger.warning(f"Registration failed - User already exists: {user.email}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered"
+            )
+            
+        # Create user in Supabase
+        auth_response = supabase.auth.admin.create_user({
+            "email": user.email,
+            "password": user.password,
+            "email_confirm": True,  # Skip email confirmation for POC
+            "user_metadata": user.user_metadata or {}
+        })
+        
+        logger.info(f"User created in Supabase: {user.email}")
+        return {"message": "User created successfully", "email": user.email}
+    except Exception as e:
+        error_msg = f"Registration error: {str(e)}"
+        logger.error(error_msg, exc_info=True)  # Include full traceback
+        
+        # Extract more detailed error message if available
+        detail = str(e)
+        if hasattr(e, 'message') and e.message:
+            detail = e.message
+        elif hasattr(e, 'args') and e.args:
+            detail = e.args[0] if isinstance(e.args[0], str) else str(e)
+            
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=detail or "Registration failed. Please check your input and try again."
+        )
+
+@router.post("/auth/login", response_model=Dict[str, Any])
+async def login(credentials: UserLogin):
+    """Login user and return access token"""
+    try:
+        # Authenticate with Supabase
+        auth_response = supabase.auth.sign_in_with_password({
+            "email": credentials.email,
+            "password": credentials.password
+        })
+        
+        if not auth_response.user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect email or password"
+            )
+        
+        # Get the session
+        session = supabase.auth.get_session()
+        
+        return {
+            "access_token": session.access_token,
+            "refresh_token": session.refresh_token,
+            "token_type": "bearer",
+            "user": {
+                "id": auth_response.user.id,
+                "email": auth_response.user.email,
+                "role": auth_response.user.role
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Login error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password"
+        )
+
+@router.post("/auth/refresh")
+async def refresh_token(refresh_token: str):
+    """Refresh access token"""
+    try:
+        session = supabase.auth.refresh_session(refresh_token)
+        return {
+            "access_token": session.access_token,
+            "refresh_token": session.refresh_token,
+            "token_type": "bearer"
+        }
+    except Exception as e:
+        logger.error(f"Token refresh error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+
+@router.post("/auth/logout")
+async def logout():
+    """Logout user"""
+    try:
+        supabase.auth.sign_out()
+        return {"message": "Successfully logged out"}
+    except Exception as e:
+        logger.error(f"Logout error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Logout failed"
+        )
+
+# Dependency to get current user from token
+async def get_current_active_user(authorization: HTTPAuthorizationCredentials = Security(security)) -> Dict[str, Any]:
+    """Dependency to get the current authenticated user using Supabase JWT"""
+    try:
+        token = authorization.credentials
+        # Use Supabase's built-in JWT verification
+        user = supabase.auth.get_user(token)
+        return {
+            'id': user.user.id,
+            'email': user.user.email,
+            'role': user.user.role,
+            'token': token
+        }
+    except Exception as e:
+        logger.error(f"Authentication error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+# Error handling middleware moved to main.py
 
 # --- Pydantic Schemas ---
 class ProjectBase(BaseModel):
@@ -28,6 +208,15 @@ class ProjectBase(BaseModel):
 
 class ProjectCreate(ProjectBase):
     pass
+
+class ProjectUpdate(BaseModel):
+    """Schema for updating a project (all fields are optional)"""
+    name: Optional[str] = None
+    address: Optional[str] = None
+    start_date: Optional[date] = None
+    target_completion_date: Optional[date] = None
+    status: Optional[str] = None
+    total_sqft: Optional[int] = None
 
 class ProjectOut(ProjectBase):
     id: int
@@ -87,44 +276,311 @@ class DrawTrackerOut(DrawTrackerBase):
     }
 
 # --- Project CRUD ---
-@router.post("/projects/", response_model=ProjectOut)
-def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
-    db_project = Project(**project.model_dump())
-    db.add(db_project)
-    db.commit()
-    db.refresh(db_project)
-    return db_project
+@router.get("/projects/{project_id}", 
+            response_model=ProjectOut)
+async def get_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
+    """Get a specific project by ID"""
+    try:
+        # First try to get from Supabase
+        try:
+            response = supabase.table('projects')\
+                .select('*')\
+                .eq('id', project_id)\
+                .eq('user_id', current_user['id'])\
+                .execute()
+            
+            if not response.data:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Project not found"
+                )
+                
+            project_data = response.data[0]
+            
+            # Update or add to local database
+            existing_project = db.query(Project).filter(Project.id == project_id).first()
+            if existing_project:
+                # Update existing project
+                for key, value in project_data.items():
+                    setattr(existing_project, key, value)
+                db.commit()
+                db.refresh(existing_project)
+                return existing_project
+            else:
+                # Add new project to local database
+                db_project = Project(**project_data)
+                db.add(db_project)
+                db.commit()
+                db.refresh(db_project)
+                return db_project
+                
+        except HTTPException:
+            raise
+            
+        except Exception as e:
+            logger.error(f"Supabase error, falling back to local database: {str(e)}")
+            # Fallback to local database
+            db_project = db.query(Project).filter(
+                Project.id == project_id,
+                Project.user_id == current_user['id']
+            ).first()
+            
+            if not db_project:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Project not found"
+                )
+                
+            return db_project
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting project: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve project"
+        )
 
-@router.get("/projects/", response_model=List[ProjectOut])
-def list_projects(db: Session = Depends(get_db)):
-    return db.query(Project).all()
+@router.get("/projects/", 
+            response_model=List[ProjectOut])
+async def list_projects(
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
+    """List all projects for the current user"""
+    try:
+        # Get projects from Supabase
+        try:
+            response = supabase.table('projects')\
+                .select('*')\
+                .eq('user_id', current_user['id'])\
+                .execute()
+            
+            projects_data = response.data if response.data else []
+            
+            # Sync with local database
+            if projects_data:
+                # Get existing project IDs from the database
+                existing_ids = {p.id for p in db.query(Project).filter(Project.user_id == current_user['id']).all()}
+                
+                # Add or update projects in the local database
+                for project_data in projects_data:
+                    if project_data['id'] in existing_ids:
+                        # Update existing project
+                        db.query(Project)\
+                            .filter(Project.id == project_data['id'])\
+                            .update(project_data)
+                    else:
+                        # Add new project
+                        db_project = Project(**project_data)
+                        db.add(db_project)
+                
+                db.commit()
+            
+            # Return projects from Supabase
+            return projects_data
+            
+        except Exception as e:
+            logger.error(f"Supabase error: {str(e)}")
+            # Fallback to local database if Supabase fails
+            return db.query(Project)\
+                .filter(Project.user_id == current_user['id'])\
+                .all()
+        
+    except Exception as e:
+        logger.error(f"Error listing projects: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve projects"
+        )
 
-@router.get("/projects/{project_id}", response_model=ProjectOut)
-def get_project(project_id: int, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return project
+@router.get("/projects/{project_id}", 
+           response_model=ProjectOut,
+           dependencies=[Depends(get_current_active_user)])
+async def get_project(
+    project_id: int, 
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
+    """Get a specific project by ID (must be owned by the current user)"""
+    try:
+        project = db.query(Project)\
+            .filter(
+                Project.id == project_id,
+                Project.user_id == current_user.id
+            )\
+            .first()
+            
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found or access denied"
+            )
+            
+        return project
+        
+    except Exception as e:
+        logger.error(f"Error getting project {project_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve project"
+        )
 
-@router.put("/projects/{project_id}", response_model=ProjectOut)
-def update_project(project_id: int, project: ProjectCreate, db: Session = Depends(get_db)):
-    db_project = db.query(Project).filter(Project.id == project_id).first()
-    if not db_project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    for key, value in project.model_dump().items():
-        setattr(db_project, key, value)
-    db.commit()
-    db.refresh(db_project)
-    return db_project
+@router.put("/projects/{project_id}", 
+            response_model=ProjectOut)
+async def update_project(
+    project_id: int,
+    project: ProjectUpdate,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
+    """Update a project"""
+    try:
+        # First update in Supabase
+        update_data = project.dict(exclude_unset=True)
+        
+        try:
+            # Check if project exists and belongs to user
+            response = supabase.table('projects')\
+                .select('id')\
+                .eq('id', project_id)\
+                .eq('user_id', current_user['id'])\
+                .execute()
+                
+            if not response.data:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Project not found"
+                )
+                
+            # Update in Supabase
+            supabase_response = supabase.table('projects')\
+                .update(update_data)\
+                .eq('id', project_id)\
+                .eq('user_id', current_user['id'])\
+                .execute()
+                
+            if not supabase_response.data:
+                raise Exception("Failed to update project in Supabase")
+                
+            # Get updated project data
+            updated_project = supabase_response.data[0]
+            
+            # Update in local database
+            db_project = db.query(Project).filter(Project.id == project_id).first()
+            if db_project:
+                for key, value in updated_project.items():
+                    setattr(db_project, key, value)
+                db.commit()
+                db.refresh(db_project)
+            else:
+                # If not in local DB, add it
+                db_project = Project(**updated_project)
+                db.add(db_project)
+                db.commit()
+                db.refresh(db_project)
+                
+            return db_project
+            
+        except HTTPException:
+            raise
+            
+        except Exception as e:
+            logger.error(f"Supabase error: {str(e)}")
+            # Fallback to local database
+            db_project = db.query(Project).filter(
+                Project.id == project_id,
+                Project.user_id == current_user['id']
+            ).first()
+            
+            if not db_project:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Project not found"
+                )
+                
+            # Update in local database
+            for field, value in update_data.items():
+                setattr(db_project, field, value)
+                
+            db.commit()
+            db.refresh(db_project)
+            return db_project
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating project: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update project"
+        )
 
-@router.delete("/projects/{project_id}")
-def delete_project(project_id: int, db: Session = Depends(get_db)):
-    db_project = db.query(Project).filter(Project.id == project_id).first()
-    if not db_project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    db.delete(db_project)
-    db.commit()
-    return {"deleted": True}
+@router.delete("/projects/{project_id}",
+             status_code=status.HTTP_204_NO_CONTENT)
+async def delete_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
+    """Delete a project"""
+    try:
+        # First try to delete from Supabase
+        try:
+            # Check if project exists and belongs to user
+            response = supabase.table('projects')\
+                .select('id')\
+                .eq('id', project_id)\
+                .eq('user_id', current_user['id'])\
+                .execute()
+                
+            if not response.data:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Project not found"
+                )
+                
+            # Delete from Supabase
+            supabase.table('projects')\
+                .delete()\
+                .eq('id', project_id)\
+                .eq('user_id', current_user['id'])\
+                .execute()
+                
+        except HTTPException:
+            raise
+            
+        except Exception as e:
+            logger.error(f"Supabase error: {str(e)}")
+            # Continue with local deletion even if Supabase fails
+            
+        # Delete from local database
+        db_project = db.query(Project).filter(
+            Project.id == project_id,
+            Project.user_id == current_user['id']
+        ).first()
+        
+        if db_project:
+            db.delete(db_project)
+            db.commit()
+            
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting project: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete project"
+        )
 
 # --- ForecastLineItem CRUD ---
 @router.post("/forecast-items/", response_model=ForecastLineItemOut)
