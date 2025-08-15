@@ -25,8 +25,8 @@ if missing_vars:
     raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
 # Import database and models
-from database import engine, Base, get_db
-from models import *  # Import all models to ensure they're registered with SQLAlchemy
+from api.core.database import engine, Base, get_db
+from api.models import *  # Import all models to ensure they're registered with SQLAlchemy
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -49,7 +49,7 @@ app.add_middleware(
 )
 
 # Include API routers
-from routers import router as api_router
+from api.api import api_router
 app.include_router(api_router, prefix="/api/v1")
 
 # Error handling middleware
