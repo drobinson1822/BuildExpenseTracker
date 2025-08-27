@@ -2,17 +2,14 @@
 from typing import List, Dict, Any
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status, Security
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from api.core.database import get_db
 from api.models.draw import DrawTracker
 from api.schemas.draw import DrawTrackerCreate, DrawTrackerOut
 from api.core.supabase import supabase
-
-# Security configuration
-security = HTTPBearer()
+from api.core.auth import get_current_active_user
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -20,32 +17,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def get_current_active_user(authorization: HTTPAuthorizationCredentials = Security(security)) -> Dict[str, Any]:
-    """Dependency to get the current authenticated user using Supabase JWT"""
-    try:
-        token = authorization.credentials
-        user = supabase.auth.get_user(token)
-        
-        if not user.user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        return {
-            'id': user.user.id,
-            'email': user.user.email,
-            'role': user.user.role or 'user',
-            'token': token
-        }
-    except Exception as e:
-        logger.error(f"Authentication error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
 
 @router.post("/", response_model=DrawTrackerOut)
 def create_draw(
@@ -55,13 +26,19 @@ def create_draw(
 ):
     """Create a new draw tracker"""
     try:
-        db_draw = DrawTracker(**draw.model_dump())
-        db.add(db_draw)
-        db.commit()
-        db.refresh(db_draw)
-        return db_draw
+        draw_data = draw.model_dump()
+        draw_data['user_id'] = current_user['id']
+        
+        # Convert date to string for Supabase
+        if 'last_draw_date' in draw_data and draw_data['last_draw_date']:
+            draw_data['last_draw_date'] = str(draw_data['last_draw_date'])
+        
+        response = supabase.table('draw_tracker').insert(draw_data).execute()
+        if not response.data:
+            raise Exception("Failed to create draw in Supabase")
+        
+        return response.data[0]
     except Exception as e:
-        db.rollback()
         logger.error(f"Error creating draw: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -75,7 +52,12 @@ def list_draws(
 ):
     """List all draw trackers"""
     try:
-        return db.query(DrawTracker).all()
+        response = supabase.table('draw_tracker')\
+            .select('*')\
+            .eq('user_id', current_user['id'])\
+            .execute()
+        
+        return response.data
     except Exception as e:
         logger.error(f"Error listing draws: {str(e)}")
         raise HTTPException(
@@ -91,13 +73,19 @@ def get_draw(
 ):
     """Get a specific draw tracker by ID"""
     try:
-        draw = db.query(DrawTracker).filter(DrawTracker.id == draw_id).first()
-        if not draw:
+        response = supabase.table('draw_tracker')\
+            .select('*')\
+            .eq('id', draw_id)\
+            .eq('user_id', current_user['id'])\
+            .execute()
+        
+        if not response.data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, 
                 detail="Draw not found"
             )
-        return draw
+        
+        return response.data[0]
     except HTTPException:
         raise
     except Exception as e:
@@ -116,23 +104,34 @@ def update_draw(
 ):
     """Update a draw tracker"""
     try:
-        db_draw = db.query(DrawTracker).filter(DrawTracker.id == draw_id).first()
-        if not db_draw:
+        # First check if draw exists and belongs to user
+        existing = supabase.table('draw_tracker')\
+            .select('id')\
+            .eq('id', draw_id)\
+            .eq('user_id', current_user['id'])\
+            .execute()
+        
+        if not existing.data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, 
                 detail="Draw not found"
             )
         
-        for key, value in draw.model_dump().items():
-            setattr(db_draw, key, value)
+        # Update the draw
+        draw_data = draw.model_dump()
+        response = supabase.table('draw_tracker')\
+            .update(draw_data)\
+            .eq('id', draw_id)\
+            .eq('user_id', current_user['id'])\
+            .execute()
         
-        db.commit()
-        db.refresh(db_draw)
-        return db_draw
+        if not response.data:
+            raise Exception("Failed to update draw")
+        
+        return response.data[0]
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
         logger.error(f"Error updating draw: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -147,20 +146,30 @@ def delete_draw(
 ):
     """Delete a draw tracker"""
     try:
-        db_draw = db.query(DrawTracker).filter(DrawTracker.id == draw_id).first()
-        if not db_draw:
+        # First check if draw exists and belongs to user
+        existing = supabase.table('draw_tracker')\
+            .select('id')\
+            .eq('id', draw_id)\
+            .eq('user_id', current_user['id'])\
+            .execute()
+        
+        if not existing.data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, 
                 detail="Draw not found"
             )
         
-        db.delete(db_draw)
-        db.commit()
+        # Delete the draw
+        response = supabase.table('draw_tracker')\
+            .delete()\
+            .eq('id', draw_id)\
+            .eq('user_id', current_user['id'])\
+            .execute()
+        
         return {"deleted": True}
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
         logger.error(f"Error deleting draw: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

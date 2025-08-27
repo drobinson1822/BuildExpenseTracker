@@ -23,10 +23,10 @@ class SupabaseService:
         """Get the Supabase client with secret key"""
         if cls._instance is None:
             url = os.getenv("SUPABASE_URL")
-            secret_key = os.getenv("SUPABASE_SECRET_KEY")
-            if not url or not secret_key:
-                raise ValueError("SUPABASE_URL and SUPABASE_SECRET_KEY must be set in .env")
-            cls._instance = create_client(url, secret_key)
+            service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+            if not url or not service_role_key:
+                raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in .env")
+            cls._instance = create_client(url, service_role_key)
         return cls._instance
 
 # Create singleton instance

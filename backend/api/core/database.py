@@ -22,11 +22,11 @@ def get_database_url() -> str:
     # Parse the URL to check the scheme
     parsed_url = urlparse(database_url)
     
-    # In test environment, allow SQLite
-    if os.getenv("ENV") == "test" and database_url.startswith('sqlite://'):
+    # In test or development environment, allow SQLite
+    if os.getenv("ENV") in ["test", "development"] and database_url.startswith('sqlite://'):
         return database_url
         
-    # For non-test environments, require PostgreSQL
+    # For production environments, require PostgreSQL
     if parsed_url.scheme != 'postgresql':
         # If it's a postgres:// URL, convert it to postgresql://
         if database_url.startswith('postgres://'):

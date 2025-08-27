@@ -1,6 +1,7 @@
 """Forecast line item model and related enums."""
 
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, Enum, Text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import enum
 from .base import Base
@@ -16,6 +17,7 @@ class ForecastLineItem(Base):
     __tablename__ = "forecast_line_items"
     
     id = Column(Integer, primary_key=True)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     category = Column(String, nullable=False)
     estimated_cost = Column(Float, nullable=False)

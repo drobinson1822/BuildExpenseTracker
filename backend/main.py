@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import text
 from typing import Generator
 import logging
 
@@ -16,7 +17,7 @@ load_dotenv(f'.env.{env}')
 # Verify required environment variables
 required_vars = [
     'SUPABASE_URL',
-    'SUPABASE_SECRET_KEY',
+    'SUPABASE_SERVICE_ROLE_KEY',
     'DATABASE_URL'
 ]
 
@@ -78,7 +79,8 @@ async def health_check():
     try:
         # Test database connection
         with engine.connect() as conn:
-            conn.execute("SELECT 1")
+            result = conn.execute(text("SELECT 1"))
+            result.fetchone()
         db_status = "connected"
     except Exception as e:
         logging.error(f"Database connection check failed: {str(e)}")

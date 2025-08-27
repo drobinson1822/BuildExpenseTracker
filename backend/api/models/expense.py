@@ -1,6 +1,7 @@
 """Actual expense model."""
 
 from sqlalchemy import Column, Integer, String, Float, Date, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from .base import Base
 
@@ -9,6 +10,7 @@ class ActualExpense(Base):
     __tablename__ = "actual_expenses"
     
     id = Column(Integer, primary_key=True)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     forecast_line_item_id = Column(Integer, ForeignKey("forecast_line_items.id"), nullable=True)
     vendor = Column(String)

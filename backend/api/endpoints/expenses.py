@@ -2,17 +2,14 @@
 from typing import List, Dict, Any
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status, Security
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from api.core.database import get_db
 from api.models.expense import ActualExpense
 from api.schemas.expense import ActualExpenseCreate, ActualExpenseOut
 from api.core.supabase import supabase
-
-# Security configuration
-security = HTTPBearer()
+from api.core.auth import get_current_active_user
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -20,32 +17,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def get_current_active_user(authorization: HTTPAuthorizationCredentials = Security(security)) -> Dict[str, Any]:
-    """Dependency to get the current authenticated user using Supabase JWT"""
-    try:
-        token = authorization.credentials
-        user = supabase.auth.get_user(token)
-        
-        if not user.user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        return {
-            'id': user.user.id,
-            'email': user.user.email,
-            'role': user.user.role or 'user',
-            'token': token
-        }
-    except Exception as e:
-        logger.error(f"Authentication error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
 
 @router.post("/", response_model=ActualExpenseOut)
 def create_expense(
@@ -55,17 +26,26 @@ def create_expense(
 ):
     """Create a new actual expense"""
     try:
-        db_expense = ActualExpense(**expense.model_dump())
-        db.add(db_expense)
-        db.commit()
-        db.refresh(db_expense)
-        return db_expense
+        expense_data = expense.model_dump()
+        expense_data['user_id'] = current_user['id']
+        
+        # Convert date to string for Supabase
+        if 'date' in expense_data and expense_data['date']:
+            expense_data['date'] = str(expense_data['date'])
+        
+        response = supabase.table('actual_expenses').insert(expense_data).execute()
+        if not response.data:
+            logger.error(f"Supabase response: {response}")
+            raise Exception("Failed to create expense in Supabase")
+        
+        return response.data[0]
     except Exception as e:
-        db.rollback()
         logger.error(f"Error creating expense: {str(e)}")
+        logger.error(f"Expense data: {expense_data}")
+        logger.error(f"Current user: {current_user}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create expense"
+            detail=f"Failed to create expense: {str(e)}"
         )
 
 @router.get("/", response_model=List[ActualExpenseOut])
@@ -75,7 +55,12 @@ def list_expenses(
 ):
     """List all actual expenses"""
     try:
-        return db.query(ActualExpense).all()
+        response = supabase.table('actual_expenses')\
+            .select('*')\
+            .eq('user_id', current_user['id'])\
+            .execute()
+        
+        return response.data
     except Exception as e:
         logger.error(f"Error listing expenses: {str(e)}")
         raise HTTPException(
@@ -91,13 +76,19 @@ def get_expense(
 ):
     """Get a specific actual expense by ID"""
     try:
-        expense = db.query(ActualExpense).filter(ActualExpense.id == expense_id).first()
-        if not expense:
+        response = supabase.table('actual_expenses')\
+            .select('*')\
+            .eq('id', expense_id)\
+            .eq('user_id', current_user['id'])\
+            .execute()
+        
+        if not response.data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, 
                 detail="Expense not found"
             )
-        return expense
+        
+        return response.data[0]
     except HTTPException:
         raise
     except Exception as e:
@@ -116,23 +107,34 @@ def update_expense(
 ):
     """Update an actual expense"""
     try:
-        db_expense = db.query(ActualExpense).filter(ActualExpense.id == expense_id).first()
-        if not db_expense:
+        # First check if expense exists and belongs to user
+        existing = supabase.table('actual_expenses')\
+            .select('id')\
+            .eq('id', expense_id)\
+            .eq('user_id', current_user['id'])\
+            .execute()
+        
+        if not existing.data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, 
                 detail="Expense not found"
             )
         
-        for key, value in expense.model_dump().items():
-            setattr(db_expense, key, value)
+        # Update the expense
+        expense_data = expense.model_dump()
+        response = supabase.table('actual_expenses')\
+            .update(expense_data)\
+            .eq('id', expense_id)\
+            .eq('user_id', current_user['id'])\
+            .execute()
         
-        db.commit()
-        db.refresh(db_expense)
-        return db_expense
+        if not response.data:
+            raise Exception("Failed to update expense")
+        
+        return response.data[0]
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
         logger.error(f"Error updating expense: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -147,20 +149,30 @@ def delete_expense(
 ):
     """Delete an actual expense"""
     try:
-        db_expense = db.query(ActualExpense).filter(ActualExpense.id == expense_id).first()
-        if not db_expense:
+        # First check if expense exists and belongs to user
+        existing = supabase.table('actual_expenses')\
+            .select('id')\
+            .eq('id', expense_id)\
+            .eq('user_id', current_user['id'])\
+            .execute()
+        
+        if not existing.data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, 
                 detail="Expense not found"
             )
         
-        db.delete(db_expense)
-        db.commit()
+        # Delete the expense
+        response = supabase.table('actual_expenses')\
+            .delete()\
+            .eq('id', expense_id)\
+            .eq('user_id', current_user['id'])\
+            .execute()
+        
         return {"deleted": True}
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
         logger.error(f"Error deleting expense: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

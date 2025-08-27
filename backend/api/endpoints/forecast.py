@@ -2,17 +2,14 @@
 from typing import List, Dict, Any
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status, Security
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from api.core.database import get_db
 from api.models.forecast import ForecastLineItem
 from api.schemas.forecast import ForecastLineItemCreate, ForecastLineItemOut
 from api.core.supabase import supabase
-
-# Security configuration
-security = HTTPBearer()
+from api.core.auth import get_current_active_user
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -20,32 +17,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def get_current_active_user(authorization: HTTPAuthorizationCredentials = Security(security)) -> Dict[str, Any]:
-    """Dependency to get the current authenticated user using Supabase JWT"""
-    try:
-        token = authorization.credentials
-        user = supabase.auth.get_user(token)
-        
-        if not user.user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        return {
-            'id': user.user.id,
-            'email': user.user.email,
-            'role': user.user.role or 'user',
-            'token': token
-        }
-    except Exception as e:
-        logger.error(f"Authentication error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
 
 @router.post("/", response_model=ForecastLineItemOut)
 def create_forecast_item(
@@ -55,13 +26,15 @@ def create_forecast_item(
 ):
     """Create a new forecast line item"""
     try:
-        db_item = ForecastLineItem(**item.model_dump())
-        db.add(db_item)
-        db.commit()
-        db.refresh(db_item)
-        return db_item
+        item_data = item.model_dump()
+        item_data['user_id'] = current_user['id']
+        
+        response = supabase.table('forecast_line_items').insert(item_data).execute()
+        if not response.data:
+            raise Exception("Failed to create forecast item in Supabase")
+        
+        return response.data[0]
     except Exception as e:
-        db.rollback()
         logger.error(f"Error creating forecast item: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -75,7 +48,12 @@ def list_forecast_items(
 ):
     """List all forecast line items"""
     try:
-        return db.query(ForecastLineItem).all()
+        response = supabase.table('forecast_line_items')\
+            .select('*')\
+            .eq('user_id', current_user['id'])\
+            .execute()
+        
+        return response.data
     except Exception as e:
         logger.error(f"Error listing forecast items: {str(e)}")
         raise HTTPException(
@@ -91,13 +69,19 @@ def get_forecast_item(
 ):
     """Get a specific forecast line item by ID"""
     try:
-        item = db.query(ForecastLineItem).filter(ForecastLineItem.id == item_id).first()
-        if not item:
+        response = supabase.table('forecast_line_items')\
+            .select('*')\
+            .eq('id', item_id)\
+            .eq('user_id', current_user['id'])\
+            .execute()
+        
+        if not response.data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, 
                 detail="Forecast item not found"
             )
-        return item
+        
+        return response.data[0]
     except HTTPException:
         raise
     except Exception as e:
@@ -116,23 +100,34 @@ def update_forecast_item(
 ):
     """Update a forecast line item"""
     try:
-        db_item = db.query(ForecastLineItem).filter(ForecastLineItem.id == item_id).first()
-        if not db_item:
+        # First check if item exists and belongs to user
+        existing = supabase.table('forecast_line_items')\
+            .select('id')\
+            .eq('id', item_id)\
+            .eq('user_id', current_user['id'])\
+            .execute()
+        
+        if not existing.data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, 
                 detail="Forecast item not found"
             )
         
-        for key, value in item.model_dump().items():
-            setattr(db_item, key, value)
+        # Update the item
+        item_data = item.model_dump()
+        response = supabase.table('forecast_line_items')\
+            .update(item_data)\
+            .eq('id', item_id)\
+            .eq('user_id', current_user['id'])\
+            .execute()
         
-        db.commit()
-        db.refresh(db_item)
-        return db_item
+        if not response.data:
+            raise Exception("Failed to update forecast item")
+        
+        return response.data[0]
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
         logger.error(f"Error updating forecast item: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -147,20 +142,30 @@ def delete_forecast_item(
 ):
     """Delete a forecast line item"""
     try:
-        db_item = db.query(ForecastLineItem).filter(ForecastLineItem.id == item_id).first()
-        if not db_item:
+        # First check if item exists and belongs to user
+        existing = supabase.table('forecast_line_items')\
+            .select('id')\
+            .eq('id', item_id)\
+            .eq('user_id', current_user['id'])\
+            .execute()
+        
+        if not existing.data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, 
                 detail="Forecast item not found"
             )
         
-        db.delete(db_item)
-        db.commit()
+        # Delete the item
+        response = supabase.table('forecast_line_items')\
+            .delete()\
+            .eq('id', item_id)\
+            .eq('user_id', current_user['id'])\
+            .execute()
+        
         return {"deleted": True}
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
         logger.error(f"Error deleting forecast item: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

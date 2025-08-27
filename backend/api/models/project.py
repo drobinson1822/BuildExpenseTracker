@@ -1,6 +1,7 @@
 """Project model and related enums."""
 
 from sqlalchemy import Column, Integer, String, Date, Enum
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import enum
 from .base import Base
@@ -16,6 +17,7 @@ class Project(Base):
     __tablename__ = "projects"
     
     id = Column(Integer, primary_key=True)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
     name = Column(String, nullable=False)
     address = Column(String)
     start_date = Column(Date)

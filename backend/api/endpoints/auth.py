@@ -1,13 +1,9 @@
 """Authentication endpoints."""
-from fastapi import APIRouter, Depends, HTTPException, status, Security
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import APIRouter, Depends, HTTPException, status
 from typing import Dict, Any
 import logging
-from api.core.supabase import get_current_user, supabase, supabase_admin
+from api.core.supabase import supabase, supabase_admin
 from api.schemas.auth import Token, UserCreate, UserLogin
-
-# Security configuration
-security = HTTPBearer()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -15,54 +11,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def get_current_user_http(authorization: HTTPAuthorizationCredentials = Security(security)) -> Dict[str, Any]:
-    """
-    Get current user from Authorization header using Supabase's JWT
-    """
-    try:
-        token = authorization.credentials
-        # Use Supabase's built-in JWT verification
-        user = supabase.auth.get_user(token)
-        return {
-            'id': user.user.id,
-            'email': user.user.email,
-            'role': user.user.role,
-            'token': token
-        }
-    except Exception as e:
-        logging.error(f"Authentication error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-async def get_current_active_user(authorization: HTTPAuthorizationCredentials = Security(security)) -> Dict[str, Any]:
-    """Dependency to get the current authenticated user using Supabase JWT"""
-    try:
-        token = authorization.credentials
-        user = supabase.auth.get_user(token)
-        
-        if not user.user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        return {
-            'id': user.user.id,
-            'email': user.user.email,
-            'role': user.user.role or 'user',
-            'token': token
-        }
-    except Exception as e:
-        logger.error(f"Authentication error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
 
 @router.post("/register", response_model=Dict[str, Any])
 async def register(user: UserCreate):
@@ -70,16 +18,7 @@ async def register(user: UserCreate):
     logger.info(f"Attempting to register user with email: {user.email}")
     
     try:
-        # Check if user already exists in Supabase
-        existing_user = supabase.auth.admin.get_user_by_email(user.email)
-        if existing_user.user:
-            logger.warning(f"Registration failed - User already exists: {user.email}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered"
-            )
-            
-        # Create user in Supabase
+        # Create user in Supabase (will fail if user already exists)
         auth_response = supabase.auth.admin.create_user({
             "email": user.email,
             "password": user.password,
