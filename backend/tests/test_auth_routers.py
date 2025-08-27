@@ -8,15 +8,16 @@ class TestAuthenticationRouters:
     """Test authentication endpoints"""
 
     def test_register_success(self, client, mock_supabase):
-        """Test successful user registration"""
-        # Mock successful registration
-        mock_user = Mock()
-        mock_user.user.id = "new-user-id"
-        mock_user.user.email = "newuser@example.com"
-        
-        mock_supabase.auth.admin.get_user_by_email.return_value = Mock(user=None)
-        mock_supabase.auth.admin.create_user.return_value = mock_user
-        
+        """Register returns tokens and user after auto-login."""
+        # Mock sign_up succeeds
+        mock_supabase.auth.sign_up.return_value = Mock()
+        # Mock sign_in_with_password returns session + user
+        mock_user_obj = Mock()
+        mock_user_obj.id = "new-user-id"
+        mock_user_obj.email = "newuser@example.com"
+        mock_session = Mock(access_token="access-token", refresh_token="refresh-token")
+        mock_supabase.auth.sign_in_with_password.return_value = Mock(user=mock_user_obj, session=mock_session)
+
         response = client.post(
             "/api/v1/auth/register",
             json={
@@ -25,19 +26,18 @@ class TestAuthenticationRouters:
                 "user_metadata": {"name": "Test User"}
             }
         )
-        
+
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        assert data["message"] == "User created successfully"
-        assert data["email"] == "newuser@example.com"
+        assert data["access_token"] == "access-token"
+        assert data["refresh_token"] == "refresh-token"
+        assert data["token_type"] == "bearer"
+        assert data["user"]["email"] == "newuser@example.com"
 
     def test_register_existing_user(self, client, mock_supabase):
-        """Test registration with existing email"""
-        # Mock existing user
-        existing_user = Mock()
-        existing_user.user.email = "existing@example.com"
-        mock_supabase.auth.admin.get_user_by_email.return_value = existing_user
-        
+        """Registration fails when Supabase sign_up rejects existing email."""
+        mock_supabase.auth.sign_up.side_effect = Exception("Email already registered")
+
         response = client.post(
             "/api/v1/auth/register",
             json={
@@ -45,10 +45,10 @@ class TestAuthenticationRouters:
                 "password": "testpassword123"
             }
         )
-        
+
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         data = response.json()
-        assert "Email already registered" in data["detail"]
+        assert "already" in data["detail"].lower()
 
     def test_register_invalid_data(self, client):
         """Test registration with invalid data"""

@@ -14,31 +14,54 @@ router = APIRouter()
 
 @router.post("/register", response_model=Dict[str, Any])
 async def register(user: UserCreate):
-    """Register a new user"""
+    """Register a new user and return tokens (auto-login)."""
     logger.info(f"Attempting to register user with email: {user.email}")
-    
+
     try:
-        # Create user in Supabase (will fail if user already exists)
-        auth_response = supabase.auth.admin.create_user({
+        # Use public sign_up to avoid admin privileges requirement
+        supabase.auth.sign_up({
             "email": user.email,
             "password": user.password,
-            "email_confirm": True,  # Skip email confirmation for POC
-            "user_metadata": user.user_metadata or {}
+            "options": {
+                "data": user.user_metadata or {}
+            }
         })
-        
-        logger.info(f"User created in Supabase: {user.email}")
-        return {"message": "User created successfully", "email": user.email}
+
+        # Immediately sign in to return tokens for MVP UX
+        auth_response = supabase.auth.sign_in_with_password({
+            "email": user.email,
+            "password": user.password
+        })
+
+        if not auth_response.user or not auth_response.session:
+            logger.warning(f"Auto login after register failed for: {user.email}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Registration succeeded but auto login failed"
+            )
+
+        logger.info(f"User registered and logged in: {user.email}")
+        return {
+            "access_token": auth_response.session.access_token,
+            "token_type": "bearer",
+            "refresh_token": auth_response.session.refresh_token,
+            "user": {
+                "id": auth_response.user.id,
+                "email": auth_response.user.email,
+                "role": auth_response.user.role or "user"
+            }
+        }
     except Exception as e:
         error_msg = f"Registration error: {str(e)}"
         logger.error(error_msg, exc_info=True)  # Include full traceback
-        
+
         # Extract more detailed error message if available
         detail = str(e)
         if hasattr(e, 'message') and e.message:
             detail = e.message
         elif hasattr(e, 'args') and e.args:
             detail = e.args[0] if isinstance(e.args[0], str) else str(e)
-            
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=detail or "Registration failed. Please check your input and try again."

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { fetchProject, fetchForecastItems, fetchExpenses, createOrUpdateExpense } from "./api";
+import { fetchProject, fetchForecastItems, fetchExpenses, createOrUpdateExpense, createForecastItem, updateForecastItem, updateProject } from "./api";
 import ForecastTable from "./ForecastTable";
 
 export default function ProjectDetail() {
@@ -11,6 +11,8 @@ export default function ProjectDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // All requests now use centralized api.js helpers with auth headers
+
   // --- Budget summary calculations ---
   // Proposed = sum of all forecast line items
   const totalForecast = forecastItems.reduce((sum, i) => sum + Number(i.estimated_cost || 0), 0);
@@ -20,18 +22,13 @@ export default function ProjectDetail() {
   // Add line item
   async function handleAddLineItem(newItem) {
     try {
-      const res = await fetch("http://localhost:8000/api/forecast-items/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...newItem,
-          project_id: Number(id),
-          estimated_cost: Number(newItem.estimated_cost),
-          progress_percent: Number(newItem.progress_percent)
-        })
-      });
-      if (!res.ok) throw new Error("Failed to add forecast item");
-      const added = await res.json();
+      const payload = {
+        ...newItem,
+        project_id: Number(id),
+        estimated_cost: Number(newItem.estimated_cost),
+        progress_percent: Number(newItem.progress_percent),
+      };
+      const added = await createForecastItem(payload);
       setForecastItems((prev) => [...prev, added]);
     } catch (e) {
       alert(e.message);
@@ -52,13 +49,7 @@ export default function ProjectDetail() {
     if (!project) return;
     if (project.status !== newStatus) {
       try {
-        const res = await fetch(`http://localhost:8000/api/projects/${project.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...project, status: newStatus })
-        });
-        if (!res.ok) throw new Error("Failed to update project status");
-        const updated = await res.json();
+        const updated = await updateProject(project.id, { ...project, status: newStatus });
         setProject(updated);
       } catch (e) {
         // Optionally show error
@@ -69,19 +60,12 @@ export default function ProjectDetail() {
   // Edit line item
   async function handleEditLineItem(itemId, changes) {
     try {
-      // Update forecast line item
-      const res = await fetch(`http://localhost:8000/api/forecast-items/${itemId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...changes,
-          project_id: Number(id),
-          estimated_cost: Number(changes.estimated_cost),
-          progress_percent: Number(changes.progress_percent)
-        })
+      const updated = await updateForecastItem(itemId, {
+        ...changes,
+        project_id: Number(id),
+        estimated_cost: Number(changes.estimated_cost),
+        progress_percent: Number(changes.progress_percent),
       });
-      if (!res.ok) throw new Error("Failed to update line item");
-      const updated = await res.json();
       setForecastItems((prev) => {
         const newItems = prev.map(i => i.id === itemId ? updated : i);
         // After updating, recompute project status and sync if needed
