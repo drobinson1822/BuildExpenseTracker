@@ -1,113 +1,124 @@
-# BuildExpenseTracker
+# Expense Tracker - Construction Cost Management
 
-A modern web application for forecasting, budgeting, and tracking expenses throughout a construction or home build project.
+A FastAPI-based expense tracking application for construction projects with Supabase backend.
 
----
+## Database Schema
 
-## Overview
+### Authentication
+- Uses Supabase Auth with JWT tokens
+- All tables include `user_id` for data isolation
+- Row Level Security (RLS) policies ensure users only access their own data
 
-**BuildExpenseTracker** is a full-stack MVP that enables users to:
-- Create and manage multiple construction projects
-- Define detailed forecast (budget) line items for each project
-- Log and track actual expenses against each forecast item
-- Visualize progress, compare estimated vs. actual costs, and monitor draw readiness
+### Tables
 
-The app is designed for single-user/internal use (no authentication required for MVP) and is optimized for fast, spreadsheet-like entry and editing of budget data.
-
----
-
-## Features
-
-- **Project Management:**
-  - Add/view multiple projects with address, dates, status, and square footage
-- **Forecast/Budget Table:**
-  - Excel-like, editable table of forecast line items per project
-  - Add, edit, and update category, description, estimated cost, progress, and status
-  - See estimated vs. actuals side by side for each line item
-- **Expense Tracking:**
-  - Log actual expenses, link to forecast items, and track vendor, date, amount, and receipts
-- **Progress & Dashboard (Planned):**
-  - Visualize project status, budget vs. actuals, and draw readiness
-- **Modern Tech Stack:**
-  - React (Vite) frontend, Tailwind CSS UI
-  - FastAPI backend (Python), SQLAlchemy ORM
-  - SQLite for local/dev, easy migration to Postgres/Supabase for production
-
----
-
-## Architecture
-
-```
-frontend/   # React + Tailwind (Vite)
-backend/    # FastAPI, SQLAlchemy, Pydantic, SQLite
+#### `projects`
+```sql
+id SERIAL PRIMARY KEY
+user_id UUID NOT NULL REFERENCES auth.users(id)
+name VARCHAR NOT NULL
+address VARCHAR
+start_date DATE
+target_completion_date DATE
+status VARCHAR DEFAULT 'not_started' -- ('not_started', 'in_progress', 'completed')
+total_sqft INTEGER
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 ```
 
-- **API:** RESTful endpoints for projects, forecast line items, expenses, and draws
-- **Database:**
-  - `Project`, `ForecastLineItem`, `ActualExpense`, `DrawTracker` tables
-  - Designed for easy migration from SQLite (dev) to Postgres (prod)
-
----
-
-## Quickstart
-
-### Prerequisites
-- Python 3.9+
-- Node.js (v18+ recommended)
-
-### 1. Backend (FastAPI)
-
-```sh
-cd backend
-pip install -r requirements.txt  # Or: python3 -m pip install -r requirements.txt
-uvicorn main:app --reload
+#### `forecast_line_items`
+```sql
+id SERIAL PRIMARY KEY
+user_id UUID NOT NULL REFERENCES auth.users(id)
+project_id INTEGER NOT NULL REFERENCES projects(id)
+category VARCHAR NOT NULL
+estimated_cost DECIMAL(10,2) NOT NULL
+unit VARCHAR
+notes TEXT
+progress_percent INTEGER DEFAULT 0 -- (0-100)
+status VARCHAR DEFAULT 'Not Started' -- ('Not Started', 'In Progress', 'Complete')
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 ```
-- By default uses SQLite (set `DATABASE_URL` in `.env` to override)
-- API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
-### 2. Frontend (React)
-
-```sh
-cd frontend
-npm install
-npm run dev
+#### `actual_expenses`
+```sql
+id SERIAL PRIMARY KEY
+user_id UUID NOT NULL REFERENCES auth.users(id)
+project_id INTEGER NOT NULL REFERENCES projects(id)
+forecast_line_item_id INTEGER REFERENCES forecast_line_items(id)
+vendor VARCHAR
+amount_spent DECIMAL(10,2) NOT NULL
+date DATE
+receipt_url VARCHAR
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 ```
-- App runs at [http://localhost:5173](http://localhost:5173)
-- Connects to backend at `http://localhost:8000`
 
----
+#### `draw_tracker`
+```sql
+id SERIAL PRIMARY KEY
+user_id UUID NOT NULL REFERENCES auth.users(id)
+project_id INTEGER NOT NULL REFERENCES projects(id)
+cash_on_hand DECIMAL(10,2) NOT NULL
+last_draw_date DATE
+draw_triggered BOOLEAN DEFAULT FALSE
+notes TEXT
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+```
 
-## Usage
+## Setup
 
-1. **Create a Project:**
-   - Enter name, address, dates, status, and total sqft
-2. **Add Forecast Line Items:**
-   - Use the compact table to add/edit categories, costs, units, notes, progress, and status
-   - Inline editing for rapid workflow
-3. **Log Expenses:**
-   - Add expenses, link to forecast items, and upload receipts (planned)
-4. **Monitor Progress:**
-   - Compare estimated vs. actual costs for each line item
-   - Dashboard and draw readiness (coming soon)
+### Environment Variables
+Create `.env.development` in the backend directory:
+```env
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
+SUPABASE_ANON_KEY=your-anon-public-key-here
+ENV=development
+DATABASE_URL=sqlite:///./expense_tracker.db
+```
 
----
+### Supabase Setup
+1. Create a new Supabase project
+2. Run the SQL from `backend/supabase_schema.sql` in the Supabase SQL Editor
+3. This creates all tables with RLS policies for user data isolation
 
-## Development Notes
+### API Endpoints
 
-- **No authentication** in MVP; intended for single-user/internal use
-- All backend endpoints are fully tested (see `backend/test_api.py`)
-- Modernized for SQLAlchemy 2.x and Pydantic v2
-- Designed for easy extension (add authentication, dashboards, deployment)
+#### Authentication
+- `POST /auth/register` - Register new user
+- `POST /auth/login` - Login and get JWT token
+- `POST /auth/refresh` - Refresh JWT token
+- `POST /auth/logout` - Logout user
 
----
+#### Projects (requires Bearer token)
+- `GET /projects` - List user's projects
+- `POST /projects` - Create new project
+- `GET /projects/{id}` - Get specific project
+- `PUT /projects/{id}` - Update project
+- `DELETE /projects/{id}` - Delete project
 
-## Roadmap
-- [ ] Dashboard view for overall budget/progress
-- [ ] Draw readiness and payment tracking
-- [ ] User authentication (optional)
-- [ ] Production deployment (Supabase/Postgres + Vercel/Render)
+#### Forecast Items (requires Bearer token)
+- `GET /forecast` - List forecast items
+- `POST /forecast` - Create forecast item
+- `PUT /forecast/{id}` - Update forecast item
+- `DELETE /forecast/{id}` - Delete forecast item
 
----
+#### Expenses (requires Bearer token)
+- `GET /expenses` - List expenses
+- `POST /expenses` - Create expense
+- `PUT /expenses/{id}` - Update expense
+- `DELETE /expenses/{id}` - Delete expense
 
-## License
-MIT
+#### Draws (requires Bearer token)
+- `GET /draws` - List draws
+- `POST /draws` - Create draw
+- `PUT /draws/{id}` - Update draw
+- `DELETE /draws/{id}` - Delete draw
+
+## Security Features
+- JWT-based authentication via Supabase
+- Row Level Security (RLS) policies on all tables
+- User-scoped data access (users only see their own data)
+- Service role key used server-side, bypasses RLS with manual user_id filtering
