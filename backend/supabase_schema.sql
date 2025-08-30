@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS forecast_line_items (
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     category VARCHAR NOT NULL,
     estimated_cost DECIMAL(10,2) NOT NULL,
+    actual_cost DECIMAL(10,2) DEFAULT 0.00,
     unit VARCHAR,
     notes TEXT,
     progress_percent INTEGER DEFAULT 0 CHECK (progress_percent >= 0 AND progress_percent <= 100),

@@ -1,6 +1,6 @@
 """Authentication endpoints."""
-from fastapi import APIRouter, Depends, HTTPException, status
-from typing import Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, status, Header
+from typing import Dict, Any, Optional
 import logging
 from api.core.supabase import supabase, supabase_admin
 from api.schemas.auth import Token, UserCreate, UserLogin
@@ -19,11 +19,15 @@ async def register(user: UserCreate):
 
     try:
         # Use public sign_up to avoid admin privileges requirement
+        metadata = user.user_metadata or {}
+        if user.full_name:
+            metadata["full_name"] = user.full_name
+            
         supabase.auth.sign_up({
             "email": user.email,
             "password": user.password,
             "options": {
-                "data": user.user_metadata or {}
+                "data": metadata
             }
         })
 
@@ -141,6 +145,46 @@ async def refresh_token(refresh_token: str):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Failed to refresh token"
+        )
+
+@router.get("/me", response_model=Dict[str, Any])
+async def get_current_user(authorization: Optional[str] = Header(None)):
+    """Get current user information from JWT token"""
+    logger.info("Get current user request")
+    
+    if not authorization or not authorization.startswith("Bearer "):
+        logger.warning("No authorization header found")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header required"
+        )
+    
+    try:
+        # Extract JWT token from Authorization header
+        jwt_token = authorization.split(" ")[1]
+        
+        # Verify JWT token with Supabase
+        user_response = supabase.auth.get_user(jwt_token)
+        
+        if not user_response or not user_response.user:
+            logger.warning("Invalid or expired token")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token"
+            )
+        
+        logger.info(f"Current user retrieved: {user_response.user.email}")
+        return {
+            "id": user_response.user.id,
+            "email": user_response.user.email,
+            "role": getattr(user_response.user, 'role', 'user')
+        }
+    except Exception as e:
+        error_msg = f"Get current user error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Failed to authenticate user"
         )
 
 @router.post("/logout")
