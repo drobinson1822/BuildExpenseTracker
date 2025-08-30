@@ -43,15 +43,20 @@ def create_forecast_item(
 
 @router.get("/", response_model=List[ForecastLineItemOut])
 def list_forecast_items(
+    project_id: int = None,
     db: Session = Depends(get_db),
     current_user: Dict[str, Any] = Depends(get_current_active_user)
 ):
-    """List all forecast line items"""
+    """List forecast line items, optionally filtered by project_id"""
     try:
-        response = supabase.table('forecast_line_items')\
+        query = supabase.table('forecast_line_items')\
             .select('*')\
-            .eq('user_id', current_user['id'])\
-            .execute()
+            .eq('user_id', current_user['id'])
+        
+        if project_id:
+            query = query.eq('project_id', project_id)
+            
+        response = query.execute()
         
         return response.data
     except Exception as e:
@@ -113,8 +118,27 @@ def update_forecast_item(
                 detail="Forecast item not found"
             )
         
-        # Update the item
+        # Update the item - filter out actual_cost if column doesn't exist yet
         item_data = item.model_dump()
+        
+        # Check if actual_cost column exists by trying to get current record
+        try:
+            current_record = supabase.table('forecast_line_items')\
+                .select('*')\
+                .eq('id', item_id)\
+                .limit(1)\
+                .execute()
+            
+            # If actual_cost is not in the current record, remove it from update data
+            if current_record.data and 'actual_cost' not in current_record.data[0]:
+                logger.warning("actual_cost column not found in database, removing from update")
+                item_data.pop('actual_cost', None)
+                
+        except Exception as column_check_error:
+            logger.warning(f"Could not check for actual_cost column: {str(column_check_error)}")
+            # Remove actual_cost to be safe
+            item_data.pop('actual_cost', None)
+        
         response = supabase.table('forecast_line_items')\
             .update(item_data)\
             .eq('id', item_id)\

@@ -2,6 +2,7 @@
 from datetime import date
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, validator
+from decimal import Decimal
 from enum import Enum
 
 class ProjectStatusEnum(str, Enum):
@@ -17,6 +18,7 @@ class ProjectBase(BaseModel):
     target_completion_date: Optional[date] = None
     status: Optional[ProjectStatusEnum] = ProjectStatusEnum.not_started
     total_sqft: Optional[int] = None
+    total_budget: Optional[Decimal] = None
 
 class ProjectCreate(ProjectBase):
     """Schema for creating a new project."""
@@ -30,6 +32,7 @@ class ProjectUpdate(BaseModel):
     target_completion_date: Optional[date] = None
     status: Optional[ProjectStatusEnum] = None
     total_sqft: Optional[int] = None
+    total_budget: Optional[Decimal] = None
 
 class ProjectOut(ProjectBase):
     """Schema for project responses."""

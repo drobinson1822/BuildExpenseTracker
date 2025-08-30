@@ -84,6 +84,16 @@ async def create_project(
         project_data = project.dict()
         project_data['user_id'] = current_user['id']
         
+        # Convert date objects to strings for JSON serialization
+        if project_data.get('start_date'):
+            project_data['start_date'] = project_data['start_date'].isoformat()
+        if project_data.get('target_completion_date'):
+            project_data['target_completion_date'] = project_data['target_completion_date'].isoformat()
+        
+        # Convert Decimal objects to float for JSON serialization
+        if project_data.get('total_budget'):
+            project_data['total_budget'] = float(project_data['total_budget'])
+        
         # Create in Supabase only
         response = supabase.table('projects')\
             .insert(project_data)\
@@ -114,6 +124,16 @@ async def update_project(
     try:
         # First update in Supabase
         update_data = project.dict(exclude_unset=True)
+        
+        # Convert date objects to strings for JSON serialization
+        if update_data.get('start_date'):
+            update_data['start_date'] = update_data['start_date'].isoformat()
+        if update_data.get('target_completion_date'):
+            update_data['target_completion_date'] = update_data['target_completion_date'].isoformat()
+        
+        # Convert Decimal objects to float for JSON serialization
+        if update_data.get('total_budget'):
+            update_data['total_budget'] = float(update_data['total_budget'])
         
         try:
             # Check if project exists and belongs to user

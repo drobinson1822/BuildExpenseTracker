@@ -20,9 +20,11 @@ class ForecastLineItem(Base):
     user_id = Column(UUID(as_uuid=True), nullable=False)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     category = Column(String, nullable=False)
+    description = Column(Text)  # Brief description of the line item
     estimated_cost = Column(Float, nullable=False)
+    actual_cost = Column(Float, default=0.0)
     unit = Column(String)
-    notes = Column(Text)
+    notes = Column(Text)  # Additional notes/comments
     progress_percent = Column(Integer, default=0)
     status = Column(Enum(ForecastStatusEnum), default=ForecastStatusEnum.not_started)
     

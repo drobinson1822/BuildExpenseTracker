@@ -66,6 +66,14 @@ def mock_supabase():
         'role': 'authenticated'
     })
     
+    # Also inject into the actual module used by endpoints
+    try:
+        import api.core.supabase as core_supabase
+        core_supabase.supabase = mock_supabase
+        core_supabase.supabase_admin = mock_supabase
+    except Exception:
+        pass
+
     yield mock_supabase
 
 # Database session fixture

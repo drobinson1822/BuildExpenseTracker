@@ -12,6 +12,7 @@ class UserCreate(BaseModel):
     """Schema for user creation."""
     email: str
     password: str
+    full_name: Optional[str] = None
     user_metadata: Optional[Dict[str, Any]] = None
 
 class UserLogin(BaseModel):

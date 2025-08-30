@@ -1,6 +1,6 @@
 """Project model and related enums."""
 
-from sqlalchemy import Column, Integer, String, Date, Enum
+from sqlalchemy import Column, Integer, String, Date, Enum, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import enum
@@ -24,6 +24,7 @@ class Project(Base):
     target_completion_date = Column(Date)
     status = Column(Enum(ProjectStatusEnum), default=ProjectStatusEnum.not_started)
     total_sqft = Column(Integer)
+    total_budget = Column(Numeric(10, 2))
     
     # Relationships
     forecast_items = relationship("ForecastLineItem", back_populates="project")
