@@ -1,4 +1,6 @@
 import os
+import subprocess
+from datetime import datetime
 from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -73,8 +75,8 @@ async def error_middleware(request: Request, call_next):
             content={"detail": "An unexpected error occurred"}
         )
 
-# Health check endpoint
-@app.get("/health")
+# Health check endpoint (as specified in deployment guide)
+@app.get("/healthz")
 async def health_check():
     try:
         # Test database connection
@@ -87,9 +89,30 @@ async def health_check():
         db_status = "disconnected"
         
     return {
-        "status": "healthy" if db_status == "connected" else "degraded",
+        "status": "ok" if db_status == "connected" else "degraded",
         "environment": env,
         "database": db_status
+    }
+
+
+# Version endpoint (as specified in deployment guide)
+@app.get("/version")
+async def version_info():
+    try:
+        # Get git SHA
+        git_sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], 
+            cwd=os.path.dirname(__file__),
+            stderr=subprocess.DEVNULL
+        ).decode().strip()[:8]
+    except:
+        git_sha = "unknown"
+    
+    return {
+        "version": "1.0.0",
+        "git_sha": git_sha,
+        "build_timestamp": datetime.now().isoformat(),
+        "environment": env
     }
 
 # Root endpoint

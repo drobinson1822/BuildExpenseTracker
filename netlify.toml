@@ -1,0 +1,31 @@
+# Netlify deployment configuration for BuildExpenseTracker frontend
+[build]
+  base = "frontend"
+  publish = "dist"
+  command = "npm ci && npm run build"
+
+[build.environment]
+  NODE_VERSION = "18"
+  NPM_VERSION = "9"
+
+# Redirect all routes to index.html for SPA routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Development context (deploy previews)
+[context.deploy-preview]
+  [context.deploy-preview.environment]
+    VITE_API_BASE = "https://buildexpensetracker-api-dev.onrender.com/api/v1"
+    # Set these in Netlify dashboard:
+    # VITE_SUPABASE_URL
+    # VITE_SUPABASE_ANON_KEY
+
+# Production context
+[context.production]
+  [context.production.environment]
+    VITE_API_BASE = "https://buildexpensetracker-api.onrender.com/api/v1"
+    # Set these in Netlify dashboard:
+    # VITE_SUPABASE_URL
+    # VITE_SUPABASE_ANON_KEY
