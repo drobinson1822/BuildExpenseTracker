@@ -1,7 +1,7 @@
 # BuildExpenseTracker - Project Progress Tracker
 
-**Last Updated:** 2025-08-27 08:01:00  
-**Project Status:** ✅ Backend MVP Complete • ✅ Frontend Auth MVP Complete • ⏳ Ongoing Frontend Integration
+**Last Updated:** 2025-08-29 22:19:00  
+**Project Status:** ✅ Backend MVP Complete • ✅ Frontend Auth MVP Complete • ✅ UI/UX Improvements Complete • ⏳ Ongoing Frontend Integration
 
 ---
 
@@ -194,7 +194,39 @@ Test notes:
 
 ---
 
-## ✅ Updates in this session
+## ✅ Updates in this session (2025-08-29)
+
+### **Major UI/UX Improvements**
+- **Enhanced ForecastTable Editing Experience:**
+  - Implemented dual editing modes: inline editing + modal editing
+  - Click-to-edit functionality on any table cell
+  - Properly sized input fields with `min-width` constraints
+  - Auto-expanding inputs with dollar sign indicators for currency fields
+  - Multi-line textarea for notes with proper sizing
+  - Modern focus states and hover effects following UI standards
+
+- **Navigation Improvements:**
+  - Added back button to ProjectDetailPage for easy navigation to projects list
+  - Clean button styling with left arrow icon and hover states
+
+- **Column Order Adjustments:**
+  - Switched table headers back to "Budgeted" then "Actual" 
+  - Reordered totals summary to show "Total Estimated" before "Total Spent"
+
+### **Critical Bug Fixes**
+- **Status Constraint Violation Fixed:**
+  - Database schema only allows: `'Not Started'`, `'In Progress'`, `'Complete'`
+  - Frontend was using invalid values: `'Pending'`, `'Completed'`
+  - Updated all status dropdowns to match database constraints
+  - Resolved forecast item creation error (HTTP 400 constraint violation)
+
+### **Code Quality Improvements**
+- Consistent error handling across inline and modal editing
+- Proper state management for dual editing modes
+- Clean separation of concerns between UI components
+- Modern React patterns with proper hooks usage
+
+### **Previous Session Updates**
 - Implemented frontend authentication MVP:
   - `frontend/src/AuthContext.jsx`, `frontend/src/Login.jsx`, `frontend/src/Register.jsx`, `frontend/src/ProtectedRoute.jsx`
   - Header logout + user display in `frontend/src/App.jsx`
@@ -208,23 +240,41 @@ Test notes:
 - Tests: updated `backend/tests/test_auth_routers.py` for new register flow and ensured Supabase mocking via `tests/conftest.py`
 
 ## 🎯 Recommended Next Steps (Functionality)
-- Authentication
-  - Implement token refresh endpoint usage on frontend; handle refresh failures by redirecting to login
+
+### **Immediate Priority (Next Session)**
+- **Database Schema Updates:**
+  - Add `total_budget` field to projects table (migration needed)
+  - Add `description` field to forecast_line_items table (migration needed)
+  - Update Supabase schema to match current frontend expectations
+
+- **Frontend Polish:**
+  - Add loading states and error handling for forecast operations
+  - Implement project creation/editing forms
+  - Add expense tracking UI components
+  - Improve responsive design for mobile devices
+
+### **Medium Priority**
+- **Authentication Enhancements:**
+  - Implement token refresh endpoint usage on frontend
+  - Handle refresh failures by redirecting to login
   - Consider migrating to httpOnly cookies for tokens in production
-- Frontend features
-  - Project CRUD UI (create/edit/delete) and navigation polish
-  - Expense entry UX: validation, date pickers, vendor suggestions
-  - Forecast enhancements: categories, sorting, inline edits, totals by category
+
+- **Feature Completions:**
   - Draw tracker UI actions and visualizations
-- Quality and DX
-  - Add loading/skeleton states and global error toasts
-  - Add Vitest/Jest tests for `AuthContext` and `api.js`
-  - Linting and Prettier config across frontend
-  - E2E smoke tests (Playwright/Cypress) for auth + key flows
-- Deployment
-  - Dockerfiles and `.env` templates
-  - Deploy backend (e.g., Render/Fly/Railway) and frontend (Netlify/Vercel)
-  - Configure Supabase env vars and RLS checks in prod
+  - Expense entry UX: validation, date pickers, vendor suggestions
+  - Forecast enhancements: categories, sorting, totals by category
+  - Project dashboard improvements: filtering, search, sorting
+
+### **Quality & Testing**
+- Add loading/skeleton states and global error toasts
+- Add Vitest/Jest tests for `AuthContext` and `api.js`
+- Linting and Prettier config across frontend
+- E2E smoke tests (Playwright/Cypress) for auth + key flows
+
+### **Deployment Preparation**
+- Dockerfiles and `.env` templates
+- Deploy backend (e.g., Render/Fly/Railway) and frontend (Netlify/Vercel)
+- Configure Supabase env vars and RLS checks in prod
 
 ---
 
@@ -276,4 +326,4 @@ http://localhost:8000/redoc # ReDoc
 
 ---
 
-**🎯 Current Objective:** Frontend authentication implementation to complete the MVP
+**🎯 Current Objective:** Database schema updates and continued frontend feature development
