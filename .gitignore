@@ -67,3 +67,11 @@ htmlcov/
 
 # Mac system files
 Icon?
+
+# BMAD
+.bmad-core/
+.windsurf/
+agents/
+expansion-packs/
+teams/
+docs/

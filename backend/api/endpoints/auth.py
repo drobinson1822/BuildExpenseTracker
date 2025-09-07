@@ -74,23 +74,38 @@ async def register(user: UserCreate):
 @router.post("/login", response_model=Dict[str, Any])
 async def login(credentials: UserLogin):
     """Login user and return access token"""
-    logger.info(f"Login attempt for user: {credentials.email}")
+    logger.info(f"🔐 Login attempt for user: {credentials.email}")
+    logger.info(f"📧 Email length: {len(credentials.email)}, Password length: {len(credentials.password)}")
     
     try:
+        # Log the request details (without password)
+        logger.info(f"🌐 Making Supabase auth request for: {credentials.email}")
+        
         # Authenticate with Supabase
         auth_response = supabase.auth.sign_in_with_password({
             "email": credentials.email,
             "password": credentials.password
         })
         
+        logger.info(f"📨 Supabase response received for: {credentials.email}")
+        logger.info(f"👤 User object exists: {auth_response.user is not None}")
+        logger.info(f"🎫 Session object exists: {auth_response.session is not None}")
+        
         if not auth_response.user:
-            logger.warning(f"Login failed for user: {credentials.email}")
+            logger.warning(f"❌ Login failed - no user returned for: {credentials.email}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"
             )
         
-        logger.info(f"User logged in successfully: {credentials.email}")
+        if not auth_response.session:
+            logger.warning(f"❌ Login failed - no session returned for: {credentials.email}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication failed - no session created"
+            )
+        
+        logger.info(f"✅ User logged in successfully: {credentials.email} (ID: {auth_response.user.id})")
         return {
             "access_token": auth_response.session.access_token,
             "token_type": "bearer",
@@ -101,20 +116,31 @@ async def login(credentials: UserLogin):
                 "role": auth_response.user.role or "user"
             }
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        error_msg = f"Login error for {credentials.email}: {str(e)}"
+        error_msg = f"💥 Login error for {credentials.email}: {str(e)}"
         logger.error(error_msg, exc_info=True)
+        
+        # Log the type of exception for debugging
+        logger.error(f"🔍 Exception type: {type(e).__name__}")
         
         # Extract more detailed error message if available
         detail = str(e)
         if hasattr(e, 'message') and e.message:
             detail = e.message
+            logger.error(f"📝 Exception message: {detail}")
         elif hasattr(e, 'args') and e.args:
             detail = e.args[0] if isinstance(e.args[0], str) else str(e)
+            logger.error(f"📝 Exception args: {e.args}")
+        
+        # Check if it's a Supabase-specific error
+        if 'supabase' in str(e).lower() or 'auth' in str(e).lower():
+            logger.error(f"🔐 Supabase authentication error detected")
             
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=detail or "Login failed. Please check your credentials."
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Login failed: {detail}"
         )
 
 @router.post("/refresh", response_model=Dict[str, Any])

@@ -1,5 +1,9 @@
 import React, { useState } from "react";
 import { Button, Input } from '../../../components/ui';
+import { getVarianceDisplay, shouldShowVariance } from '../../../utils/formatters';
+import InvoiceCell from './InvoiceCell';
+import InvoiceDrawer from './InvoiceDrawer';
+import InvoiceViewerModal from './InvoiceViewerModal';
 
 export default function ForecastTable({ items, expenses, onAdd, onEdit, onDelete }) {
   const [adding, setAdding] = useState(false);
@@ -16,33 +20,14 @@ export default function ForecastTable({ items, expenses, onAdd, onEdit, onDelete
   const [editIdx, setEditIdx] = useState(null);
   const [editItem, setEditItem] = useState({});
   const [showEditModal, setShowEditModal] = useState(false);
+  
+  // Invoice management state
+  const [invoiceDrawerOpen, setInvoiceDrawerOpen] = useState(false);
+  const [selectedLineItemId, setSelectedLineItemId] = useState(null);
+  const [selectedInvoices, setSelectedInvoices] = useState([]);
+  const [viewerModalOpen, setViewerModalOpen] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState(null);
 
-  // Get variance display with color and percentage
-  const getVarianceDisplay = (estimated, actual) => {
-    const est = parseFloat(estimated) || 0;
-    const act = parseFloat(actual) || 0;
-    const difference = est - act;
-    const percentage = est > 0 ? ((difference / est) * 100) : 0;
-    
-    if (difference > 0) {
-      return {
-        amount: `$${Math.abs(difference).toLocaleString()}`,
-        percentage: `(-${Math.abs(percentage).toFixed(1)}%)`,
-        color: 'text-green-600'
-      };
-    } else if (difference < 0) {
-      return {
-        amount: `+$${Math.abs(difference).toLocaleString()}`,
-        percentage: `(${Math.abs(percentage).toFixed(0)}%)`,
-        color: 'text-red-600'
-      };
-    }
-    return {
-      amount: '$0',
-      percentage: '(0%)',
-      color: 'text-gray-600'
-    };
-  };
 
   // Get status badge styling
   const getStatusBadge = (status) => {
@@ -149,6 +134,33 @@ export default function ForecastTable({ items, expenses, onAdd, onEdit, onDelete
     }
   }
 
+  // Invoice management handlers
+  const handleOpenInvoiceDrawer = (lineItemId, invoices) => {
+    setSelectedLineItemId(lineItemId);
+    setSelectedInvoices(invoices);
+    setInvoiceDrawerOpen(true);
+  };
+
+  const handleCloseInvoiceDrawer = () => {
+    setInvoiceDrawerOpen(false);
+    setSelectedLineItemId(null);
+    setSelectedInvoices([]);
+  };
+
+  const handleInvoiceUpdate = (updatedInvoices) => {
+    setSelectedInvoices(updatedInvoices);
+  };
+
+  const handleViewInvoice = (invoice) => {
+    setSelectedInvoice(invoice);
+    setViewerModalOpen(true);
+  };
+
+  const handleCloseViewer = () => {
+    setViewerModalOpen(false);
+    setSelectedInvoice(null);
+  };
+
   return (
     <div className="space-y-4">
       <div className="overflow-x-auto">
@@ -161,13 +173,14 @@ export default function ForecastTable({ items, expenses, onAdd, onEdit, onDelete
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actual</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Variance</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Invoices</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Notes</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {items.map((item, idx) => {
-              const variance = getVarianceDisplay(item.estimated_cost, item.actual_cost);
+              const variance = getVarianceDisplay(item.estimated_cost, item.actual_cost, item.status);
               const isEditing = editIdx === idx;
               return (
                 <tr key={item.id} className={`hover:bg-gray-50 ${isEditing ? 'bg-blue-50' : ''}`}>
@@ -260,8 +273,12 @@ export default function ForecastTable({ items, expenses, onAdd, onEdit, onDelete
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
                     <div className={variance.color}>
-                      <div className="font-medium">{variance.amount}</div>
-                      <div className="text-xs">{variance.percentage}</div>
+                      <div className="font-medium" title={variance.tooltip || undefined}>
+                        {variance.amount}
+                      </div>
+                      {variance.percentage && (
+                        <div className="text-xs">{variance.percentage}</div>
+                      )}
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
@@ -286,6 +303,12 @@ export default function ForecastTable({ items, expenses, onAdd, onEdit, onDelete
                         </span>
                       </span>
                     )}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <InvoiceCell 
+                      lineItemId={item.id}
+                      onOpenDrawer={handleOpenInvoiceDrawer}
+                    />
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-900">
                     {isEditing ? (
@@ -405,6 +428,7 @@ export default function ForecastTable({ items, expenses, onAdd, onEdit, onDelete
                     <option value="Complete">Complete</option>
                   </select>
                 </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">-</td>
                 <td className="px-6 py-4">
                   <Input 
                     placeholder="Notes" 
@@ -438,6 +462,7 @@ export default function ForecastTable({ items, expenses, onAdd, onEdit, onDelete
       <div className="mt-4">
         <Button 
           onClick={() => setAdding(true)} 
+          disabled={adding}
           className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
         >
           Add Line Item
@@ -553,6 +578,22 @@ export default function ForecastTable({ items, expenses, onAdd, onEdit, onDelete
           </div>
         </div>
       )}
+
+      {/* Invoice Components */}
+      <InvoiceDrawer
+        isOpen={invoiceDrawerOpen}
+        onClose={handleCloseInvoiceDrawer}
+        lineItemId={selectedLineItemId}
+        initialInvoices={selectedInvoices}
+        onInvoiceUpdate={handleInvoiceUpdate}
+        onViewInvoice={handleViewInvoice}
+      />
+
+      <InvoiceViewerModal
+        isOpen={viewerModalOpen}
+        onClose={handleCloseViewer}
+        invoice={selectedInvoice}
+      />
     </div>
   );
 }

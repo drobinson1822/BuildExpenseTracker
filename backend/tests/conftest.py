@@ -9,7 +9,7 @@ from typing import Generator
 os.environ["ENV"] = "test"
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["SUPABASE_URL"] = "https://mock-supabase-url.supabase.co"
-os.environ["SUPABASE_SECRET_KEY"] = "mock-supabase-secret-key"
+os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "mock-supabase-service-role-key"
 os.environ["ALLOWED_ORIGINS"] = "http://localhost:3000,http://localhost:8000"
 
 # Add the parent directory to the Python path
@@ -20,8 +20,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
-from database import Base, get_db
-from models import Project, ForecastLineItem, ActualExpense, DrawTracker, ProjectStatusEnum, ForecastStatusEnum
+from api.core.database import Base, get_db
+from api.models import Project, ForecastLineItem, ActualExpense, DrawTracker, LineItemInvoice
+from api.models.project import ProjectStatusEnum
+from api.models.forecast import ForecastStatusEnum
+from api.models.invoice import InvoiceStatusEnum
 from datetime import date, datetime
 
 # Create test database engine
@@ -32,6 +35,9 @@ engine = create_engine(
     poolclass=StaticPool,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Import all models to ensure they're registered with Base
+from api.models import *
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -107,6 +113,38 @@ def override_get_db():
 def client(db_session):
     """Create a test client with database override"""
     from main import app
+    from api.core.supabase import get_current_user
+    
+    def get_test_db():
+        try:
+            yield db_session
+        finally:
+            pass
+    
+    def mock_get_current_user():
+        import uuid
+        return {
+            'id': str(uuid.UUID('12345678-1234-5678-9abc-123456789012')),
+            'email': 'test@example.com',
+            'role': 'authenticated'
+        }
+    
+    app.dependency_overrides[get_db] = get_test_db
+    app.dependency_overrides[get_current_user] = mock_get_current_user
+    
+    # Create test client without context manager to avoid initialization issues
+    test_client = TestClient(app)
+    test_client.headers.update({'Authorization': 'Bearer mock-jwt-token'})
+    yield test_client
+    
+    # Clean up overrides
+    app.dependency_overrides.clear()
+
+# Test client without authentication
+@pytest.fixture(scope="function")
+def client_no_auth(db_session):
+    """Create a test client without authentication for testing unauthorized access"""
+    from main import app
     
     def get_test_db():
         try:
@@ -116,8 +154,38 @@ def client(db_session):
     
     app.dependency_overrides[get_db] = get_test_db
     
-    # Create test client without context manager to avoid initialization issues
     test_client = TestClient(app)
+    yield test_client
+    
+    # Clean up overrides
+    app.dependency_overrides.clear()
+
+# Test client with different user
+@pytest.fixture(scope="function")
+def client_different_user(db_session):
+    """Create a test client with a different user for testing user isolation"""
+    from main import app
+    from api.core.supabase import get_current_user
+    
+    def get_test_db():
+        try:
+            yield db_session
+        finally:
+            pass
+    
+    def mock_get_different_user():
+        import uuid
+        return {
+            'id': str(uuid.UUID('87654321-4321-8765-cba9-876543210987')),
+            'email': 'different@example.com',
+            'role': 'authenticated'
+        }
+    
+    app.dependency_overrides[get_db] = get_test_db
+    app.dependency_overrides[get_current_user] = mock_get_different_user
+    
+    test_client = TestClient(app)
+    test_client.headers.update({'Authorization': 'Bearer different-jwt-token'})
     yield test_client
     
     # Clean up overrides
@@ -144,13 +212,15 @@ def mock_auth_dependency(mock_current_user):
 # Simple test data creation functions (no Factory Boy)
 def create_test_project(db_session, **kwargs):
     """Create a test project with default or custom values"""
+    import uuid
     defaults = {
         "name": "Test Project",
         "address": "123 Test St",
         "start_date": date(2024, 1, 1),
         "target_completion_date": date(2024, 12, 31),
         "status": ProjectStatusEnum.not_started,
-        "total_sqft": 2000
+        "total_sqft": 2000,
+        "user_id": uuid.UUID('12345678-1234-5678-9abc-123456789012')
     }
     defaults.update(kwargs)
     
@@ -162,6 +232,7 @@ def create_test_project(db_session, **kwargs):
 
 def create_test_forecast_item(db_session, project_id, **kwargs):
     """Create a test forecast line item with default or custom values"""
+    import uuid
     defaults = {
         "project_id": project_id,
         "category": "Materials",
@@ -169,7 +240,8 @@ def create_test_forecast_item(db_session, project_id, **kwargs):
         "unit": "sqft",
         "notes": "Test forecast item",
         "progress_percent": 0,
-        "status": ForecastStatusEnum.not_started
+        "status": ForecastStatusEnum.not_started,
+        "user_id": uuid.UUID('12345678-1234-5678-9abc-123456789012')
     }
     defaults.update(kwargs)
     
@@ -218,7 +290,9 @@ def create_test_draw(db_session, project_id, **kwargs):
 @pytest.fixture
 def test_project(db_session):
     """Create a test project"""
+    import uuid
     project = Project(
+        user_id=uuid.uuid4(),
         name="Test Project",
         address="123 Test St",
         start_date=date(2024, 1, 1),
@@ -235,6 +309,7 @@ def test_project(db_session):
 def test_forecast_item(db_session, test_project):
     """Create a test forecast line item"""
     item = ForecastLineItem(
+        user_id=test_project.user_id,
         project_id=test_project.id,
         category="Materials",
         estimated_cost=5000.00,
@@ -278,3 +353,81 @@ def test_draw(db_session, test_project):
     db_session.commit()
     db_session.refresh(draw)
     return draw
+
+@pytest.fixture
+def test_invoice_pending(db_session, test_forecast_item):
+    """Create a test invoice in pending status"""
+    import uuid
+    invoice = LineItemInvoice(
+        user_id=uuid.UUID('12345678-1234-5678-9abc-123456789012'),
+        line_item_id=test_forecast_item.id,
+        file_name="test_invoice.pdf",
+        mime_type="application/pdf",
+        file_size=1024000,
+        storage_path="invoices/1/1/test-invoice.pdf",
+        status=InvoiceStatusEnum.pending
+    )
+    db_session.add(invoice)
+    db_session.commit()
+    db_session.refresh(invoice)
+    return invoice
+
+@pytest.fixture
+def test_invoice_uploaded(db_session, test_forecast_item):
+    """Create a test invoice in uploaded status"""
+    import uuid
+    invoice = LineItemInvoice(
+        user_id=uuid.UUID('12345678-1234-5678-9abc-123456789012'),
+        line_item_id=test_forecast_item.id,
+        file_name="uploaded_invoice.pdf",
+        mime_type="application/pdf",
+        file_size=2048000,
+        storage_path="invoices/1/1/uploaded-invoice.pdf",
+        status=InvoiceStatusEnum.uploaded
+    )
+    db_session.add(invoice)
+    db_session.commit()
+    db_session.refresh(invoice)
+    return invoice
+
+@pytest.fixture
+def client_no_auth(db_session):
+    """Create a test client without authentication"""
+    from main import app
+    
+    def get_test_db():
+        try:
+            yield db_session
+        finally:
+            pass
+    
+    app.dependency_overrides[get_db] = get_test_db
+    test_client = TestClient(app)
+    yield test_client
+    app.dependency_overrides.clear()
+
+@pytest.fixture
+def client_different_user(db_session):
+    """Create a test client with different user authentication"""
+    from main import app
+    from api.core.supabase import get_current_user
+    
+    def get_test_db():
+        try:
+            yield db_session
+        finally:
+            pass
+    
+    def get_different_user():
+        return {
+            'id': 'different-user-id',
+            'email': 'different@example.com',
+            'role': 'authenticated'
+        }
+    
+    app.dependency_overrides[get_db] = get_test_db
+    app.dependency_overrides[get_current_user] = get_different_user
+    
+    test_client = TestClient(app)
+    yield test_client
+    app.dependency_overrides.clear()

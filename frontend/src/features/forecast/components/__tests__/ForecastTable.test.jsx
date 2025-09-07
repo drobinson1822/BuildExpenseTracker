@@ -1,6 +1,13 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import ForecastTable from '../ForecastTable'
+
+// Mock the invoice service
+vi.mock('../../../services/invoiceService', () => ({
+  invoiceService: {
+    getInvoices: vi.fn().mockResolvedValue({ invoices: [] })
+  }
+}))
 
 const mockItems = [
   {
@@ -134,29 +141,28 @@ describe('ForecastTable', () => {
       />
     )
 
+    // Wait for component to load
+    await waitFor(() => {
+      expect(screen.getByText('Add Line Item')).toBeInTheDocument()
+    })
+
     // Open add form
     fireEvent.click(screen.getByText('Add Line Item'))
     
-    // Change status
-    fireEvent.change(screen.getByTestId('new-status-select'), {
-      target: { value: 'In Progress' }
-    })
-    fireEvent.change(screen.getByTestId('new-description-input'), { 
-      target: { value: 'Shingle roof' } 
-    })
-    fireEvent.change(screen.getByTestId('new-estimated-cost-input'), { 
-      target: { value: '8000' } 
-    })
+    // Fill in form
+    const categoryInput = screen.getByPlaceholderText('Category')
+    fireEvent.change(categoryInput, { target: { value: 'New Category' } })
     
-    // Submit form
-    fireEvent.click(screen.getByTitle('Add'))
+    const estimatedInputs = screen.getAllByPlaceholderText('0')
+    fireEvent.change(estimatedInputs[0], { target: { value: '5000' } })
+    
+    // Submit
+    fireEvent.click(screen.getByText('Add'))
     
     await waitFor(() => {
       expect(mockOnAdd).toHaveBeenCalledWith(expect.objectContaining({
-        category: expect.any(String),
-        notes: 'Shingle roof',
-        estimated_cost: '8000',
-        status: 'In Progress'
+        category: 'New Category',
+        estimated_cost: 5000
       }))
     })
   })
@@ -192,28 +198,57 @@ describe('ForecastTable', () => {
       />
     )
 
-    // Enter edit mode
-    const firstRow = screen.getByText('Foundation').closest('tr')
-    fireEvent.click(firstRow)
-    
-    // Fill in actual cost - this will be in edit mode, so look for the input with the current value
-    const actualInput = screen.getByDisplayValue('0')
-    fireEvent.change(actualInput, {
-      target: { value: '7500' }
+    // Wait for component to load
+    await waitFor(() => {
+      expect(screen.getByText('Foundation')).toBeInTheDocument()
     })
+
+    // Click on first item to edit
+    const foundationCell = screen.getByText('Foundation')
+    fireEvent.click(foundationCell)
     
-    // Modify a field
+    // Should show edit inputs
     const categoryInput = screen.getByDisplayValue('Foundation')
     fireEvent.change(categoryInput, { target: { value: 'Updated Foundation' } })
     
     // Save changes
-    fireEvent.click(screen.getByTitle('Save'))
+    fireEvent.click(screen.getByTitle('Save changes'))
     
     await waitFor(() => {
       expect(mockOnEdit).toHaveBeenCalledWith(1, expect.objectContaining({
         category: 'Updated Foundation'
       }))
     })
+  })
+
+  it('handles edit and cancel correctly', async () => {
+    render(
+      <ForecastTable 
+        items={mockItems} 
+        expenses={mockExpenses} 
+        onAdd={mockOnAdd} 
+        onEdit={mockOnEdit} 
+      />
+    )
+
+    // Wait for component to load
+    await waitFor(() => {
+      expect(screen.getByText('Foundation')).toBeInTheDocument()
+    })
+
+    // Click on first item to edit
+    const foundationCell = screen.getByText('Foundation')
+    fireEvent.click(foundationCell)
+    
+    // Should show edit input
+    expect(screen.getByDisplayValue('Foundation')).toBeInTheDocument()
+    
+    // Cancel edit
+    fireEvent.click(screen.getByTitle('Cancel editing'))
+    
+    // Should return to display mode
+    expect(screen.queryByDisplayValue('Foundation')).not.toBeInTheDocument()
+    expect(screen.getByText('Foundation')).toBeInTheDocument()
   })
 
   it('cancels edit mode when cancel is clicked', () => {
@@ -241,7 +276,7 @@ describe('ForecastTable', () => {
     expect(screen.getByText('Foundation')).toBeInTheDocument()
   })
 
-  it('disables add button when adding', () => {
+  it('disables add button when adding', async () => {
     render(
       <ForecastTable 
         items={mockItems} 
@@ -250,6 +285,11 @@ describe('ForecastTable', () => {
         onEdit={mockOnEdit} 
       />
     )
+
+    // Wait for component to load
+    await waitFor(() => {
+      expect(screen.getByText('Add Line Item')).toBeInTheDocument()
+    })
 
     // Open add form
     fireEvent.click(screen.getByText('Add Line Item'))

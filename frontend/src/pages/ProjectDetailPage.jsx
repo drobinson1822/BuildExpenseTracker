@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ForecastTable } from '../features/forecast/components';
 import { Button } from '../components/ui';
 import { projectService, forecastService, expenseService } from '../services';
+import { shouldShowVariance } from '../utils/formatters';
 
 const ProjectDetailPage = () => {
   const { id } = useParams();
@@ -96,12 +97,22 @@ const ProjectDetailPage = () => {
   const budgetRemaining = Math.max(0, variance);
   const budgetRemainingPercent = totalBudget > 0 ? (budgetRemaining / totalBudget * 100) : 0;
   
-  // Calculate completed items metrics
+  // Calculate completed items metrics - only include completed items where variance should be calculated
   const completedItemsCount = completedItems.length;
   const totalSpentOnCompleted = actualCostOfCompleted;
+  
+  // Filter COMPLETED items for variance calculations based on shouldShowVariance logic
+  const completedItemsForVarianceCalc = completedItems.filter(item => 
+    shouldShowVariance(item.actual_cost, item.status)
+  );
+  
+  const totalBudgetedForVarianceCalc = completedItemsForVarianceCalc.reduce((sum, item) => sum + parseFloat(item.estimated_cost || 0), 0);
+  const totalActualForVarianceCalc = completedItemsForVarianceCalc.reduce((sum, item) => sum + parseFloat(item.actual_cost || 0), 0);
+  const spendVariance = totalBudgetedForVarianceCalc - totalActualForVarianceCalc;
+  
+  // For display purposes, still show all completed items' budgeted amounts
   const totalBudgetedForCompleted = completedItems.reduce((sum, item) => sum + parseFloat(item.estimated_cost || 0), 0);
-  const totalEstimatedForCompleted = totalBudgetedForCompleted; // Same calculation, clearer naming
-  const spendVariance = totalBudgetedForCompleted - totalSpentOnCompleted;
+  const totalEstimatedForCompleted = totalBudgetedForCompleted;
   
   // Calculate project progress (based on completed items)
   const projectProgress = forecastItems.length > 0 ? (completedItemsCount / forecastItems.length * 100) : 0;
@@ -297,9 +308,15 @@ const ProjectDetailPage = () => {
         <div className="bg-gray-50 p-4 rounded-lg mb-6">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-medium">Completed Items ({completedItemsCount})</h3>
-            <span className={`text-sm font-medium px-3 py-1 rounded-full ${spendVariance >= 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-              {spendVariance >= 0 ? 'Under Budget' : 'Over Budget'}
-            </span>
+            {completedItemsForVarianceCalc.length > 0 ? (
+              <span className={`text-sm font-medium px-3 py-1 rounded-full ${spendVariance >= 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                {spendVariance >= 0 ? 'Under Budget' : 'Over Budget'}
+              </span>
+            ) : (
+              <span className="text-sm font-medium px-3 py-1 rounded-full bg-gray-100 text-gray-800">
+                Variance Pending
+              </span>
+            )}
           </div>
           
           <div className="grid grid-cols-3 gap-4 mb-4">
@@ -313,9 +330,15 @@ const ProjectDetailPage = () => {
             </div>
             <div className="text-center p-3 bg-white rounded-lg">
               <div className="text-sm text-gray-600 mb-1">Spend Variance</div>
-              <div className={`text-xl font-bold ${spendVariance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {spendVariance >= 0 ? '+' : ''}${Math.abs(spendVariance).toLocaleString()}
-              </div>
+              {completedItemsForVarianceCalc.length > 0 ? (
+                <div className={`text-xl font-bold ${spendVariance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {spendVariance >= 0 ? '+' : ''}${Math.abs(spendVariance).toLocaleString()}
+                </div>
+              ) : (
+                <div className="text-xl font-bold text-gray-600" title="Variance not calculated until spending occurs or items are marked Complete">
+                  —
+                </div>
+              )}
             </div>
           </div>
           

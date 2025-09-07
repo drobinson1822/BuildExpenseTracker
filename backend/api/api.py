@@ -1,7 +1,7 @@
 """Main API router that includes all endpoint routes."""
 from fastapi import APIRouter
 
-from api.endpoints import auth, projects, forecast, expenses, draws
+from api.endpoints import auth, projects, forecast, expenses, draws, invoices
 
 api_router = APIRouter()
 
@@ -11,3 +11,4 @@ api_router.include_router(projects.router, prefix="/projects", tags=["projects"]
 api_router.include_router(forecast.router, prefix="/forecast-items", tags=["forecast"])
 api_router.include_router(expenses.router, prefix="/expenses", tags=["expenses"])
 api_router.include_router(draws.router, prefix="/draws", tags=["draws"])
+api_router.include_router(invoices.router, tags=["invoices"])

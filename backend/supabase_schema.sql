@@ -4,6 +4,7 @@
 -- Note: auth.users table already has RLS enabled by Supabase
 
 -- Drop existing tables (in correct order due to foreign key constraints)
+DROP TABLE IF EXISTS line_item_invoices CASCADE;
 DROP TABLE IF EXISTS draw_tracker CASCADE;
 DROP TABLE IF EXISTS actual_expenses CASCADE;
 DROP TABLE IF EXISTS forecast_line_items CASCADE;
@@ -34,7 +35,7 @@ CREATE TABLE IF NOT EXISTS forecast_line_items (
     unit VARCHAR,
     notes TEXT,
     progress_percent INTEGER DEFAULT 0 CHECK (progress_percent >= 0 AND progress_percent <= 100),
-    status VARCHAR DEFAULT 'Not Started' CHECK (status IN ('Not Started', 'In Progress', 'Complete')),
+    status VARCHAR DEFAULT 'not_started' CHECK (status IN ('not_started', 'in_progress', 'complete')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -66,11 +67,26 @@ CREATE TABLE IF NOT EXISTS draw_tracker (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Line item invoices table
+CREATE TABLE IF NOT EXISTS line_item_invoices (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    line_item_id INTEGER NOT NULL REFERENCES forecast_line_items(id) ON DELETE CASCADE,
+    file_name VARCHAR NOT NULL,
+    mime_type VARCHAR NOT NULL,
+    file_size INTEGER NOT NULL,
+    storage_path VARCHAR NOT NULL,
+    status VARCHAR DEFAULT 'pending' CHECK (status IN ('pending', 'uploaded', 'failed')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Enable RLS on all tables
 ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE forecast_line_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE actual_expenses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE draw_tracker ENABLE ROW LEVEL SECURITY;
+ALTER TABLE line_item_invoices ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for projects
 CREATE POLICY "Users can view own projects" ON projects
@@ -124,6 +140,19 @@ CREATE POLICY "Users can update own draws" ON draw_tracker
 CREATE POLICY "Users can delete own draws" ON draw_tracker
     FOR DELETE USING (user_id = auth.uid());
 
+-- RLS Policies for line_item_invoices
+CREATE POLICY "Users can view own invoices" ON line_item_invoices
+    FOR SELECT USING (user_id = auth.uid());
+
+CREATE POLICY "Users can insert own invoices" ON line_item_invoices
+    FOR INSERT WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can update own invoices" ON line_item_invoices
+    FOR UPDATE USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can delete own invoices" ON line_item_invoices
+    FOR DELETE USING (user_id = auth.uid());
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
 CREATE INDEX IF NOT EXISTS idx_forecast_line_items_user_id ON forecast_line_items(user_id);
@@ -132,6 +161,8 @@ CREATE INDEX IF NOT EXISTS idx_actual_expenses_user_id ON actual_expenses(user_i
 CREATE INDEX IF NOT EXISTS idx_actual_expenses_project_id ON actual_expenses(project_id);
 CREATE INDEX IF NOT EXISTS idx_draw_tracker_user_id ON draw_tracker(user_id);
 CREATE INDEX IF NOT EXISTS idx_draw_tracker_project_id ON draw_tracker(project_id);
+CREATE INDEX IF NOT EXISTS idx_line_item_invoices_user_id ON line_item_invoices(user_id);
+CREATE INDEX IF NOT EXISTS idx_line_item_invoices_line_item_id ON line_item_invoices(line_item_id);
 
 -- Updated at triggers (optional but recommended)
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -152,4 +183,7 @@ CREATE TRIGGER update_actual_expenses_updated_at BEFORE UPDATE ON actual_expense
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_draw_tracker_updated_at BEFORE UPDATE ON draw_tracker
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_line_item_invoices_updated_at BEFORE UPDATE ON line_item_invoices
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

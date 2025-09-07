@@ -27,6 +27,14 @@ missing_vars = [var for var in required_vars if not os.getenv(var)]
 if missing_vars:
     raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
+# Log environment configuration (without sensitive values)
+logging.info(f"🔧 Environment: {env}")
+logging.info(f"🔗 Supabase URL configured: {bool(os.getenv('SUPABASE_URL'))}")
+logging.info(f"🔑 Service role key configured: {bool(os.getenv('SUPABASE_SERVICE_ROLE_KEY'))}")
+logging.info(f"💾 Database URL configured: {bool(os.getenv('DATABASE_URL'))}")
+if os.getenv('SUPABASE_URL'):
+    logging.info(f"🌐 Supabase URL domain: {os.getenv('SUPABASE_URL').split('//')[1].split('.')[0] if '//' in os.getenv('SUPABASE_URL') else 'unknown'}")
+
 # Import database and models
 from api.core.database import engine, Base, get_db
 from api.models import *  # Import all models to ensure they're registered with SQLAlchemy
@@ -43,9 +51,12 @@ app = FastAPI(
 )
 
 # CORS middleware configuration
+allowed_origins = os.getenv('ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:8000').split(',')
+logging.info(f"🌍 CORS allowed origins: {allowed_origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv('ALLOWED_ORIGINS', '*').split(','),
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,13 +66,42 @@ app.add_middleware(
 from api.api import api_router
 app.include_router(api_router, prefix="/api/v1")
 
+# Request/Response logging middleware
+@app.middleware("http")
+async def logging_middleware(request: Request, call_next):
+    start_time = datetime.now()
+    
+    # Log incoming request
+    logging.info(f"🌐 {request.method} {request.url.path} - Client: {request.client.host if request.client else 'unknown'}")
+    
+    # Log request headers (excluding sensitive ones)
+    headers_to_log = {k: v for k, v in request.headers.items() 
+                     if k.lower() not in ['authorization', 'cookie']}
+    logging.info(f"📋 Request headers: {headers_to_log}")
+    
+    # For auth endpoints, log additional details
+    if "/auth/" in str(request.url.path):
+        logging.info(f"🔐 Auth endpoint accessed: {request.url.path}")
+        logging.info(f"🌍 Origin: {request.headers.get('origin', 'not set')}")
+        logging.info(f"🔗 Referer: {request.headers.get('referer', 'not set')}")
+    
+    response = await call_next(request)
+    
+    # Calculate response time
+    process_time = (datetime.now() - start_time).total_seconds()
+    
+    # Log response
+    logging.info(f"📤 Response: {response.status_code} - {process_time:.3f}s")
+    
+    return response
+
 # Error handling middleware
 @app.middleware("http")
 async def error_middleware(request: Request, call_next):
     try:
         return await call_next(request)
     except SQLAlchemyError as e:
-        logging.error(f"Database error: {str(e)}")
+        logging.error(f"💾 Database error: {str(e)}")
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"detail": "Database error occurred"}
@@ -69,7 +109,7 @@ async def error_middleware(request: Request, call_next):
     except HTTPException:
         raise
     except Exception as e:
-        logging.error(f"Unexpected error: {str(e)}")
+        logging.error(f"💥 Unexpected error: {str(e)}", exc_info=True)
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": "An unexpected error occurred"}
